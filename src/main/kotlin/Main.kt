@@ -8,8 +8,12 @@ import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.S3Configuration
 import software.amazon.awssdk.services.s3.model.GetObjectRequest
 import software.amazon.awssdk.services.s3.model.PutObjectRequest
+import software.amazon.awssdk.services.s3.presigner.S3Presigner
+import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest
 import java.io.File
 import java.net.URI
+import java.time.Duration
+
 
 fun main() {
     val s3Client = buildS3Client()
@@ -38,13 +42,50 @@ fun main() {
         str.bufferedReader().use { it.readText() }
     }
     println(fileContent)
+
+    // The doc mentions that it's not a good practice to have a single preSigner for the entire app.
+    // We should create the client on-demand and .use it so the resources are freed properly after consumption.
+    buildS3PreSigner().use { preSigner ->
+        val getObjectRequest = GetObjectRequest.builder()
+            .bucket(bucketName)
+            .key(fileName)
+            .build()
+
+        val getObjectPresignRequest = GetObjectPresignRequest.builder()
+            .signatureDuration(Duration.ofMinutes(10))
+            .getObjectRequest(getObjectRequest)
+            .build()
+
+        val presignedGetObjectRequest = preSigner.presignGetObject(
+            getObjectPresignRequest
+        )
+        println("Pre-Signed URL: ${presignedGetObjectRequest.url()}")
+    }
 }
 
 private fun buildS3Client(): S3Client = S3Client.builder()
     .endpointOverride(URI.create("http://localhost:4566"))
-    .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test")))
+    .credentialsProvider(
+        StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test"))
+    )
     .region(Region.US_EAST_1)
     .serviceConfiguration(
-        S3Configuration.builder().pathStyleAccessEnabled(true).chunkedEncodingEnabled(false).build()
+        S3Configuration.builder()
+            // In the real world, this might need to be an environment variable
+            .pathStyleAccessEnabled(true)
+            .chunkedEncodingEnabled(false).build()
+    )
+    .build()
+
+private fun buildS3PreSigner(): S3Presigner = S3Presigner.builder()
+    .endpointOverride(URI.create("http://localhost:4566"))
+    .credentialsProvider(
+        StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test"))
+    )
+    .region(Region.US_EAST_1)
+    .serviceConfiguration(
+        S3Configuration.builder()
+            // In the real world, this might need to be an environment variable
+            .pathStyleAccessEnabled(true).build()
     )
     .build()
